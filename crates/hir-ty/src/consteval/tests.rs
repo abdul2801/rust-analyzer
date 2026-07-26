@@ -26,7 +26,7 @@ use super::{
 
 mod intrinsics;
 
-fn simplify(e: ConstEvalError) -> ConstEvalError {
+fn simplify(e: ConstEvalError<'_>) -> ConstEvalError<'_> {
     match e {
         ConstEvalError::MirEvalError(MirEvalError::InFunction(e, _)) => {
             simplify(ConstEvalError::MirEvalError(*e))
@@ -38,7 +38,7 @@ fn simplify(e: ConstEvalError) -> ConstEvalError {
 #[track_caller]
 fn check_fail(
     #[rust_analyzer::rust_fixture] ra_fixture: &str,
-    error: impl FnOnce(ConstEvalError) -> bool,
+    error: impl FnOnce(ConstEvalError<'_>) -> bool,
 ) {
     let (db, file_id) = TestDB::with_single_file(ra_fixture);
     crate::attach_db(&db, || match eval_goal(&db, file_id) {
@@ -101,7 +101,7 @@ fn check_answer(
     });
 }
 
-fn pretty_print_err(e: ConstEvalError, db: &TestDB) -> String {
+fn pretty_print_err(e: ConstEvalError<'_>, db: &TestDB) -> String {
     let mut err = String::new();
     let span_formatter = |file, range| format!("{file:?} {range:?}");
     let display_target =
@@ -118,7 +118,7 @@ fn pretty_print_err(e: ConstEvalError, db: &TestDB) -> String {
     err
 }
 
-fn eval_goal(db: &TestDB, file_id: EditionedFileId) -> Result<Allocation<'_>, ConstEvalError> {
+fn eval_goal(db: &TestDB, file_id: EditionedFileId) -> Result<Allocation<'_>, ConstEvalError<'_>> {
     let _tracing = setup_tracing();
     let interner = DbInterner::new_no_crate(db);
     let module_id = db.module_for_file(file_id.file_id(db));
@@ -2563,8 +2563,6 @@ fn const_transfer_memory() {
 }
 
 #[test]
-// FIXME
-#[should_panic]
 fn anonymous_const_block() {
     check_number(
         r#"
@@ -2630,6 +2628,19 @@ fn const_generic_subst_fn() {
     const GOAL: usize = f([1, 2, 5]);
     "#,
         3,
+    );
+}
+
+#[test]
+fn const_generic_fixed_width() {
+    check_number(
+        r#"
+    const fn m<const N: u64>() -> u64 {
+        N
+    }
+    const GOAL: u64 = m::<0>();
+    "#,
+        0,
     );
 }
 

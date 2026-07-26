@@ -7,6 +7,16 @@ use crate::tests::check;
 use super::{check_infer, check_no_mismatches, check_types};
 
 #[test]
+fn closure_in_enum_discriminant_does_not_panic() {
+    check(
+        r#"
+        enum Enum { X = || {} }
+                     // ^^^^^ expected isize, got impl Fn()
+        "#,
+    );
+}
+
+#[test]
 fn bug_484() {
     check_infer(
         r#"
@@ -40,6 +50,26 @@ fn no_panic_on_field_of_enum() {
             31..32 'x': X
             31..43 'x.some_field': {unknown}
         "#]],
+    );
+}
+
+#[test]
+fn anon_const_projection_in_impl_predicate() {
+    check_no_mismatches(
+        r#"
+trait Trait {
+    type Assoc;
+}
+
+struct S<const N: usize>;
+
+impl<const N: usize> S<N>
+where
+    S<{ N }>: Trait,
+{
+    fn new(_: <S<N> as Trait>::Assoc) {}
+}
+        "#,
     );
 }
 
@@ -2913,5 +2943,63 @@ impl Foo for Bar {
     }
 }
 "#,
+    );
+}
+
+#[test]
+fn regression_unresolved_deferred_closure_call_resolution() {
+    check_no_mismatches(
+        r#"
+//- minicore: fn
+fn caller() {
+    let _: &[u8] = &(|| encode_fn())();
+}
+"#,
+    );
+}
+
+#[test]
+fn regression_22772() {
+    check_no_mismatches(
+        r#"
+trait Resolve {
+    type Prev;
+}
+
+fn migrations_preserve_index() {
+    pub struct RefExpr1<'x> {
+        pub foo: &'x schema::v0::_Ref0,
+    }
+
+    pub fn new_column<'x, C>() -> &'x C {
+        loop {}
+    }
+
+    RefExpr1 { foo: new_column::<schema::Foo>() };
+
+    mod schema {
+        pub struct Foo {}
+        pub struct FooNew {}
+
+        impl crate::Resolve for FooNew {
+            type Prev = Foo;
+        }
+
+        pub mod v0 {
+            pub type _Ref0 = <super::FooNew as crate::Resolve>::Prev;
+        }
+    }
+}
+    "#,
+    );
+}
+
+#[test]
+fn array_repeat_closure() {
+    check(
+        r#"
+fn f() {[_; || ()]}
+     // ^^^^^^^^^^ expected (), got [{unknown}; _]
+    "#,
     );
 }

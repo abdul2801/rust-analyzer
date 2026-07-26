@@ -1,6 +1,55 @@
 use expect_test::expect;
+use hir_def::ModuleDefId;
+use rustc_type_ir::inherent::IntoKind as _;
+use test_fixture::WithFixture;
 
-use crate::tests::{check_infer, check_no_mismatches, check_types};
+use crate::{
+    db::HirDatabase,
+    next_solver::{DbInterner, RegionKind, TyKind},
+    test_db::TestDB,
+    tests::{check_infer, check_no_mismatches, check_types},
+};
+
+#[test]
+fn liberating_distinct_late_bound_lifetimes_preserves_identity() {
+    let (db, file_id) = TestDB::with_single_file(
+        r#"
+fn f<'a, 'b>(x: &'a u8, y: &'b u8) {}
+"#,
+    );
+
+    crate::attach_db(&db, || {
+        let module_id = db.module_for_file(file_id.file_id(&db));
+        let def_map = module_id.def_map(&db);
+        let scope = &def_map[module_id].scope;
+        let func = scope
+            .declarations()
+            .find_map(
+                |decl| {
+                    if let ModuleDefId::FunctionId(func) = decl { Some(func) } else { None }
+                },
+            )
+            .unwrap();
+        let interner = DbInterner::new_with(&db, module_id.krate(&db));
+        let sig = db.callable_item_signature(func.into()).instantiate_identity().skip_norm_wip();
+        let sig = interner.liberate_late_bound_regions(func.into(), sig);
+        let inputs = sig.inputs();
+        let TyKind::Ref(first_region, _first_ty, _first_mutability) = inputs[0].kind() else {
+            panic!("expected reference input, got {:?}", inputs[0]);
+        };
+        let TyKind::Ref(second_region, _second_ty, _second_mutability) = inputs[1].kind() else {
+            panic!("expected reference input, got {:?}", inputs[1]);
+        };
+        let RegionKind::ReLateParam(_first_late_param) = first_region.kind() else {
+            panic!("expected late parameter region, got {first_region:?}");
+        };
+        let RegionKind::ReLateParam(_second_late_param) = second_region.kind() else {
+            panic!("expected late parameter region, got {second_region:?}");
+        };
+
+        assert_ne!(first_region, second_region);
+    });
+}
 
 #[test]
 fn regression_20365() {
@@ -390,6 +439,26 @@ fn bar(_v: &[u8]) {}
 fn main() {
     bar(&foo());
 }
+    "#,
+    );
+}
+
+#[test]
+fn static_as_array_len_does_not_panic() {
+    check_no_mismatches(
+        r#"
+static S: usize = 8;
+const A: [u8; S] = [0; 8];
+    "#,
+    );
+}
+
+#[test]
+fn oversized_array_len_does_not_panic() {
+    // The array length literal does not fit in `usize`; interning it must not panic.
+    check_no_mismatches(
+        r#"
+fn f(_: [u8; 18446744073709551616]) {}
     "#,
     );
 }

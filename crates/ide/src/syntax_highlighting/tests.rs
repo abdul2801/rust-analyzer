@@ -447,7 +447,7 @@ macro_rules! void_2024 {
 }
 
 "#,
-        expect_file![format!("./test_data/highlight_keywords_macros.html")],
+        expect_file!["./test_data/highlight_keywords_macros.html"],
         false,
     );
 }
@@ -1066,6 +1066,8 @@ fn test_injection() {
         r##"
 fn fixture(#[rust_analyzer::rust_fixture] ra_fixture: &str) {}
 
+fn non_fixture(#[rust_analyzer] ra_fixture: &str) {}
+
 fn main() {
     fixture(r#"
 @@- minicore: sized
@@ -1082,6 +1084,8 @@ fn foo() {
     }\$0)
 }"
     );
+
+    non_fixture(r"@@- ");
 }
 "##,
         expect_file!["./test_data/highlight_injection.html"],
@@ -1581,6 +1585,19 @@ static STATIC: () = ();
 #![deprecated]
         "#,
         expect_file!["./test_data/highlight_deprecated.html"],
+        false,
+    );
+}
+
+#[test]
+fn async_fn_non_mut_param() {
+    check_highlighting(
+        r#"
+async fn get_double_async(num: u32) -> u32 {
+    num
+}
+        "#,
+        expect_file!["./test_data/async_fn_non_mut_param.html"],
         false,
     );
 }
